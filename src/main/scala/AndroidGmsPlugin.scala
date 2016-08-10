@@ -1,10 +1,32 @@
 package android.gms
 import sbt._
 import android.Keys._
+import scala.util.Try
 
 object AndroidGmsPlugin extends AutoPlugin {
   override def requires = android.AndroidPlugin
   override def trigger  = allRequirements
+  private[this] val GMS_GROUP = "com.google.android.gms"
+  private[this] val GMS_MEASUREMENT = "play-services-measurement"
+  private[this] val FIREBASE_GROUP = "com.google.firebase"
+  private[this] val FIREBASE_CORE = "firebase-core"
+  private[this] val FIREBASE_VERSION = "9.0.0"
+  private[this] val MEASUREMENT_VERSION = "8.1.0"
+  private[this] val versionOrdering = new Ordering[String] {
+    def compare(a: String, b: String) = {
+      def comparePart(part: (String, String)) = {
+        val (a, b) = part
+        Try((a.toInt, b.toInt)) match {
+          case util.Success((l, r)) => l compareTo r
+          case util.Failure(_)      => a compareTo b
+        }
+      }
+      val aParts = a.split('.')
+      val bParts = b.split('.')
+      aParts.zip(bParts).map(comparePart).find(_ != 0).getOrElse(
+        aParts.length compareTo bParts.length)
+    }
+  }
 
   val googleServicesName = "google-services.json"
   case class ApiKey(key: String)
@@ -99,11 +121,43 @@ object AndroidGmsPlugin extends AutoPlugin {
 
   object autoImport {
     val googleServicesSettings: Seq[Setting[_]] = Seq(
+      Keys.libraryDependencies in Compile := {
+        val dependencies = (Keys.libraryDependencies in Compile).value
+        val gmsVersion = Try(dependencies.filter(
+          _.organization == "com.google.android.gms").map(
+            _.revision).max(versionOrdering)).toOption
+        if (gmsVersion.isEmpty)
+          android.PluginFail("play-services is not used in this project")
+        gmsVersion.toList.flatMap { v =>
+          if (versionOrdering.compare(v, FIREBASE_VERSION) >= 0) {
+            List(FIREBASE_GROUP % FIREBASE_CORE % v)
+          } else if (versionOrdering.compare(v, MEASUREMENT_VERSION) >= 0) {
+            List(GMS_GROUP % GMS_MEASUREMENT % v)
+          } else {
+            Keys.sLog.value.warn("google play-services version is old: " + v)
+            Nil
+          }
+        } ++ dependencies
+      },
       parseGoogleServicesJson := {
         import argonaut._, Argonaut._
         val layout = projectLayout.value
         val base = Keys.baseDirectory.value
-        val (buildType,flavor) = variantConfiguration.value
+        // not available until sbt-android 1.6.13
+        //val (buildType,flavor) = variantConfiguration.value
+        val rex = """"(\S+)"""".r
+        val (buildType,flavor) =
+          buildConfigOptions.value.foldLeft(
+            (Option.empty[String],Option.empty[String])) {
+              case ((b,f),(_,n,v)) =>
+          if (n == "BUILD_TYPE") {
+            (rex.findFirstMatchIn(v).map(_.group(1)),f)
+          } else if (n == "FLAVOR") {
+            (b,rex.findFirstMatchIn(v).map(_.group(1)))
+          } else {
+            (b,f)
+          }
+        }
         val buildTypePath = for {
           b <- buildType
         } yield layout.sources / b / googleServicesName
