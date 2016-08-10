@@ -98,13 +98,12 @@ object AndroidGmsPlugin extends AutoPlugin {
   } yield t
 
   object autoImport {
-    val androidGmsSettings: Seq[Setting[_]] = Seq(
+    val googleServicesSettings: Seq[Setting[_]] = Seq(
       parseGoogleServicesJson := {
         import argonaut._, Argonaut._
         val layout = projectLayout.value
         val base = Keys.baseDirectory.value
-        val flavor = selectedFlavor.value
-        val buildType = selectedBuildType.value
+        val (buildType,flavor) = variantConfiguration.value
         val buildTypePath = for {
           b <- buildType
         } yield layout.sources / b / googleServicesName
@@ -133,9 +132,8 @@ object AndroidGmsPlugin extends AutoPlugin {
           ("string", "firebase_database_url", f)
         }.toList
         def crashReportingKey(c: ClientData) = (for {
-            _ <- c.services.maps
-            a <- c.apiKey.find(_.key.nonEmpty)
-            } yield ("string", "google_crash_reporting_api_key", a.key)).toList
+          a <- c.apiKey.find(_.key.nonEmpty)
+        } yield ("string", "google_crash_reporting_api_key", a.key)).toList
         def ads(c: ClientData): List[(String,String,String)] = {
           c.services.ads.toList.flatMap { a =>
             a.banner.toList.map { i =>
