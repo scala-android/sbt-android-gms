@@ -2,7 +2,7 @@ package android.gms
 import org.scalatest._
 
 class JsonTest extends FunSuite {
-  import AndroidGmsPlugin._
+  import AndroidGms._
   import argonaut._, Argonaut._
   test("parse json") {
     val json = io.Source.fromFile(

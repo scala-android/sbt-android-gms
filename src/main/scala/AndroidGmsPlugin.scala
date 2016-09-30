@@ -3,9 +3,8 @@ import sbt._
 import android.Keys._
 import scala.util.Try
 
-object AndroidGmsPlugin extends AutoPlugin {
-  override def requires = android.AndroidPlugin
-  override def trigger  = allRequirements
+object AndroidGms extends AutoPlugin {
+  override def requires = android.AndroidApp
   private[this] val GMS_GROUP = "com.google.android.gms"
   private[this] val GMS_MEASUREMENT = "play-services-measurement"
   private[this] val FIREBASE_GROUP = "com.google.firebase"
@@ -119,131 +118,129 @@ object AndroidGmsPlugin extends AutoPlugin {
     t <- p.trackingId
   } yield t
 
-  object autoImport {
-    val googleServicesSettings: Seq[Setting[_]] = Seq(
-      Keys.libraryDependencies in Compile := {
-        val dependencies = (Keys.libraryDependencies in Compile).value
-        val gmsVersion = Try(dependencies.filter(
-          _.organization == "com.google.android.gms").map(
-            _.revision).max(versionOrdering)).toOption
-        if (gmsVersion.isEmpty)
-          android.PluginFail("play-services is not used in this project")
-        gmsVersion.toList.flatMap { v =>
-          if (versionOrdering.compare(v, FIREBASE_VERSION) >= 0) {
-            List(FIREBASE_GROUP % FIREBASE_CORE % v)
-          } else if (versionOrdering.compare(v, MEASUREMENT_VERSION) >= 0) {
-            List(GMS_GROUP % GMS_MEASUREMENT % v)
-          } else {
-            Keys.sLog.value.warn("google play-services version is old: " + v)
-            Nil
-          }
-        } ++ dependencies
-      },
-      parseGoogleServicesJson := {
-        import argonaut._, Argonaut._
-        val layout = projectLayout.value
-        val base = Keys.baseDirectory.value
-        // not available until sbt-android 1.6.13
-        //val (buildType,flavor) = variantConfiguration.value
-        val rex = """"(\S+)"""".r
-        val (buildType,flavor) =
-          buildConfigOptions.value.foldLeft(
-            (Option.empty[String],Option.empty[String])) {
-              case ((b,f),(_,n,v)) =>
-          if (n == "BUILD_TYPE") {
-            (rex.findFirstMatchIn(v).map(_.group(1)),f)
-          } else if (n == "FLAVOR") {
-            (b,rex.findFirstMatchIn(v).map(_.group(1)))
-          } else {
-            (b,f)
+  override def projectSettings = Seq(
+    Keys.libraryDependencies in Compile := {
+      val dependencies = (Keys.libraryDependencies in Compile).value
+      val gmsVersion = Try(dependencies.filter(
+        _.organization == "com.google.android.gms").map(
+          _.revision).max(versionOrdering)).toOption
+      if (gmsVersion.isEmpty)
+        android.PluginFail("play-services is not used in this project")
+      gmsVersion.toList.flatMap { v =>
+        if (versionOrdering.compare(v, FIREBASE_VERSION) >= 0) {
+          List(FIREBASE_GROUP % FIREBASE_CORE % v)
+        } else if (versionOrdering.compare(v, MEASUREMENT_VERSION) >= 0) {
+          List(GMS_GROUP % GMS_MEASUREMENT % v)
+        } else {
+          Keys.sLog.value.warn("google play-services version is old: " + v)
+          Nil
+        }
+      } ++ dependencies
+    },
+    parseGoogleServicesJson := {
+      import argonaut._, Argonaut._
+      val layout = projectLayout.value
+      val base = Keys.baseDirectory.value
+      // not available until sbt-android 1.6.13
+      //val (buildType,flavor) = variantConfiguration.value
+      val rex = """"(\S+)"""".r
+      val (buildType,flavor) =
+        buildConfigOptions.value.foldLeft(
+          (Option.empty[String],Option.empty[String])) {
+            case ((b,f),(_,n,v)) =>
+        if (n == "BUILD_TYPE") {
+          (rex.findFirstMatchIn(v).map(_.group(1)),f)
+        } else if (n == "FLAVOR") {
+          (b,rex.findFirstMatchIn(v).map(_.group(1)))
+        } else {
+          (b,f)
+        }
+      }
+      val buildTypePath = for {
+        b <- buildType
+      } yield layout.sources / b / googleServicesName
+      val combinedPath = for {
+        b <- buildType
+        f <- flavor
+      } yield layout.sources / b / f / googleServicesName
+      val searchPaths = ((base / googleServicesName) ::
+        (buildTypePath.toList ++ combinedPath.toList)).reverse
+      searchPaths.find(_.isFile) match {
+        case None => android.PluginFail(
+          s"$googleServicesName not found at any of ${searchPaths.mkString(", ")}")
+        case Some(f) =>
+          IO.readLines(f).mkString.decodeEither[GoogleServices].fold(
+            android.PluginFail(_), identity)
+      }
+    },
+    resValues <++= Def.task {
+      val appId = applicationId.value
+      val googleServices = parseGoogleServicesJson.value
+      val client = googleServices.clients.find(
+        _.info.androidInfo.pkg == appId)
+      val projectNumber = 
+        ("string", "gcm_defaultSenderId", googleServices.project.number)
+      val firebaseUrl = googleServices.project.firebaseUrl.map { f =>
+        ("string", "firebase_database_url", f)
+      }.toList
+      def crashReportingKey(c: ClientData) = (for {
+        a <- c.apiKey.find(_.key.nonEmpty)
+      } yield ("string", "google_crash_reporting_api_key", a.key)).toList
+      def ads(c: ClientData): List[(String,String,String)] = {
+        c.services.ads.toList.flatMap { a =>
+          a.banner.toList.map { i =>
+            ("string", "test_banner_ad_unit_id", i)
+          } ++ a.interstitial.toList.map { i =>
+            ("string", "test_interstitial_ad_unit_id", i)
           }
         }
-        val buildTypePath = for {
-          b <- buildType
-        } yield layout.sources / b / googleServicesName
-        val combinedPath = for {
-          b <- buildType
-          f <- flavor
-        } yield layout.sources / b / f / googleServicesName
-        val searchPaths = ((base / googleServicesName) ::
-          (buildTypePath.toList ++ combinedPath.toList)).reverse
-        searchPaths.find(_.isFile) match {
-          case None => android.PluginFail(
-            s"$googleServicesName not found at any of ${searchPaths.mkString(", ")}")
-          case Some(f) =>
-            IO.readLines(f).mkString.decodeEither[GoogleServices].fold(
-              android.PluginFail(_), identity)
-        }
-      },
-      resValues <++= Def.task {
-        val appId = applicationId.value
-        val googleServices = parseGoogleServicesJson.value
-        val client = googleServices.clients.find(
-          _.info.androidInfo.pkg == appId)
-        val projectNumber = 
-          ("string", "gcm_defaultSenderId", googleServices.project.number)
-        val firebaseUrl = googleServices.project.firebaseUrl.map { f =>
-          ("string", "firebase_database_url", f)
-        }.toList
-        def crashReportingKey(c: ClientData) = (for {
+      }
+      def googleApp(c: ClientData): (String,String,String) = {
+        ("string", "google_app_id", c.info.sdkId)
+      }
+      def webClient(c: ClientData): List[(String,String,String)] = (for {
+        o <- c.oauthClients.find(o => o.tpe == 3 && o.id.isDefined)
+        i <- o.id
+      } yield ("string", "default_web_client_id", i)).toList
+      def maps(c: ClientData): List[(String,String,String)] = {
+        (for {
+          _ <- c.services.maps
           a <- c.apiKey.find(_.key.nonEmpty)
-        } yield ("string", "google_crash_reporting_api_key", a.key)).toList
-        def ads(c: ClientData): List[(String,String,String)] = {
-          c.services.ads.toList.flatMap { a =>
-            a.banner.toList.map { i =>
-              ("string", "test_banner_ad_unit_id", i)
-            } ++ a.interstitial.toList.map { i =>
-              ("string", "test_interstitial_ad_unit_id", i)
-            }
-          }
-        }
-        def googleApp(c: ClientData): (String,String,String) = {
-          ("string", "google_app_id", c.info.sdkId)
-        }
-        def webClient(c: ClientData): List[(String,String,String)] = (for {
-          o <- c.oauthClients.find(o => o.tpe == 3 && o.id.isDefined)
-          i <- o.id
-        } yield ("string", "default_web_client_id", i)).toList
-        def maps(c: ClientData): List[(String,String,String)] = {
-          (for {
-            _ <- c.services.maps
-            a <- c.apiKey.find(_.key.nonEmpty)
-          } yield ("string", "google_maps_key", a.key)).toList
-        }
-        if (client.isEmpty) android.PluginFail(
-          s"No client_info found for $appId in $googleServicesName")
-        client.toList.flatMap { c =>
-          googleApp(c) :: projectNumber ::
-            (maps(c) ++
-              ads(c) ++
-              firebaseUrl ++
-              crashReportingKey(c) ++
-              webClient(c))
-        }
-      },
-      gmsResGenerator := {
-        implicit val output = outputLayout.value
-        val layout = projectLayout.value
-        val appId = applicationId.value
-        val googleServices = parseGoogleServicesJson.value
-        gaTrackingId(googleServices, appId).toList.flatMap { t=> 
-          val xml =
-            s"""<?xml version="1.0" encoding="utf-8"?>
-               |<resources>
-               |  <string name="ga_trackingId" translatable="false">$t</string>
-               |</resources>
-               |""".stripMargin
+        } yield ("string", "google_maps_key", a.key)).toList
+      }
+      if (client.isEmpty) android.PluginFail(
+        s"No client_info found for $appId in $googleServicesName")
+      client.toList.flatMap { c =>
+        googleApp(c) :: projectNumber ::
+          (maps(c) ++
+            ads(c) ++
+            firebaseUrl ++
+            crashReportingKey(c) ++
+            webClient(c))
+      }
+    },
+    gmsResGenerator := {
+      implicit val output = outputLayout.value
+      val layout = projectLayout.value
+      val appId = applicationId.value
+      val googleServices = parseGoogleServicesJson.value
+      gaTrackingId(googleServices, appId).toList.flatMap { t=> 
+        val xml =
+          s"""<?xml version="1.0" encoding="utf-8"?>
+             |<resources>
+             |  <string name="ga_trackingId" translatable="false">$t</string>
+             |</resources>
+             |""".stripMargin
 
-          val xmlRes = layout.generatedRes / "xml"
-          xmlRes.mkdirs()
-          IO.write(xmlRes / "global_tracker.xml", xml)
+        val xmlRes = layout.generatedRes / "xml"
+        xmlRes.mkdirs()
+        IO.write(xmlRes / "global_tracker.xml", xml)
 
-          List(xmlRes / "global_tracker.xml")
-        }
-      },
-      collectResources <<= collectResources dependsOn gmsResGenerator
-    )
-  }
+        List(xmlRes / "global_tracker.xml")
+      }
+    },
+    collectResources <<= collectResources dependsOn gmsResGenerator
+  )
 }
 
 // vim: sw=2 ts=2 et
