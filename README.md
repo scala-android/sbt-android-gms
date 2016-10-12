@@ -6,11 +6,11 @@ A plugin to process google-services.json for sbt-android
 
 add to `project/plugins.sbt`:
 
-    addSbtPlugin("org.scala-android" % "sbt-android-gms" % "0.2")
+    addSbtPlugin("org.scala-android" % "sbt-android-gms" % "0.3")
 
 add to `build.sbt`:
 
-    googleServicesSettings
+    enablePlugins(AndroidGms)
 
 ## Description
 
