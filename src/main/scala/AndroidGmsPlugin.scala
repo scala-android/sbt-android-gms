@@ -1,10 +1,14 @@
 package android.gms
 import sbt._
+import com.hanhuy.sbt.bintray.UpdateChecker
 import android.Keys._
 import scala.util.Try
 
 object AndroidGms extends AutoPlugin {
   override def requires = android.AndroidApp
+  val GmsConfig = config("android-gms-internal").hide
+  val updateCheck = TaskKey[Unit]("update-check",
+    "check for a new version of the plugin") in GmsConfig
   private[this] val GMS_GROUP = "com.google.android.gms"
   private[this] val GMS_MEASUREMENT = "play-services-measurement"
   private[this] val FIREBASE_GROUP = "com.google.firebase"
@@ -118,7 +122,29 @@ object AndroidGms extends AutoPlugin {
     t <- p.trackingId
   } yield t
 
+  override def globalSettings = (Keys.onLoad := Keys.onLoad.value andThen { s =>
+    Project.runTask(updateCheck, s).fold(s)(_._1)
+  }) :: Nil
+
   override def projectSettings = Seq(
+    updateCheck := {
+      val log = Keys.streams.value.log
+      UpdateChecker("pfn", "sbt-plugins", "sbt-android-gms") {
+        case Left(t) =>
+          log.debug("Failed to load version info: " + t)
+        case Right((versions, current)) =>
+          log.debug("available versions: " + versions)
+          log.debug("current version: " + BuildInfo.version)
+          log.debug("latest version: " + current)
+          if (versions(BuildInfo.version)) {
+            if (BuildInfo.version != current) {
+              log.warn(
+                s"UPDATE: A newer sbt-android-gms is available:" +
+                s" $current, currently running: ${BuildInfo.version}")
+            }
+          }
+      }
+    },
     Keys.libraryDependencies in Compile := {
       val dependencies = (Keys.libraryDependencies in Compile).value
       val gmsVersion = Try(dependencies.filter(

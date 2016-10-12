@@ -20,3 +20,7 @@ bintrayOrganization in bintray := None
 
 scriptedSettings
 scriptedLaunchOpts ++= Seq("-Xmx1024m", "-Dplugin.version=" + version.value)
+
+buildInfoSettings
+sourceGenerators in Compile <+= buildInfo
+buildInfoPackage := "android.gms"
