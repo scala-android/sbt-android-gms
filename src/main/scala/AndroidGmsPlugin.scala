@@ -211,7 +211,10 @@ object AndroidGms extends AutoPlugin {
       }.toList
       def crashReportingKey(c: ClientData) = (for {
         a <- c.apiKey.find(_.key.nonEmpty)
-      } yield ("string", "google_crash_reporting_api_key", a.key)).toList
+      } yield List(
+        ("string", "google_crash_reporting_api_key", a.key),
+        ("string", "google_api_key", a.key)
+      )).getOrElse(Nil)
       def ads(c: ClientData): List[(String,String,String)] = {
         c.services.ads.toList.flatMap { a =>
           a.banner.toList.map { i =>
