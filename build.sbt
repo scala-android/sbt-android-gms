@@ -2,7 +2,7 @@ import bintray.Keys._
 
 name := "sbt-android-gms"
 organization := "org.scala-android"
-version := "0.4-SNAPSHOT"
+version := "0.4"
 
 scalacOptions ++= Seq("-deprecation","-Xlint","-feature", "-unchecked")
 sbtPlugin := true
