@@ -3,6 +3,7 @@ import sbt._
 import com.hanhuy.sbt.bintray.UpdateChecker
 import android.Keys._
 import scala.util.Try
+import java.util.UUID
 
 object AndroidGms extends AutoPlugin {
   override def requires = android.AndroidApp
@@ -213,7 +214,8 @@ object AndroidGms extends AutoPlugin {
         a <- c.apiKey.find(_.key.nonEmpty)
       } yield List(
         ("string", "google_crash_reporting_api_key", a.key),
-        ("string", "google_api_key", a.key)
+        ("string", "google_api_key", a.key),
+        ("string", "com.crashlytics.android.build_id", UUID.randomUUID.toString)
       )).getOrElse(Nil)
       def ads(c: ClientData): List[(String,String,String)] = {
         c.services.ads.toList.flatMap { a =>
